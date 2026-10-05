@@ -464,3 +464,12 @@ p { margin: 0; }
 #save-notice, #save-error { margin: 10px 0 18px; }
 #save-notice a { font-weight: 600; }
 .results-toolbar { margin-top: 22px; }
+
+/* "Coming in v2" note */
+.soon-note { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 14px 0 0; font-size: 13px; color: var(--ink-2); }
+.soon-tag {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 650; letter-spacing: 0.03em; text-transform: uppercase;
+  color: var(--copper); background: #f8ebdf; white-space: nowrap;
+}
+.step .soon-note { margin-top: 12px; }
