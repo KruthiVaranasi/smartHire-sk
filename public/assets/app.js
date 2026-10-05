@@ -575,6 +575,13 @@
   $('edit-answers').addEventListener('click', () => goTo(2));
   $('progress-back').addEventListener('click', () => { hideError($('step3-error')); goTo(2); });
 
+  // Names copied from resume headers are often in capitals ("JANE DOE"); show them as "Jane Doe"
+  function displayName(name) {
+    const text = String(name).trim();
+    if (text !== text.toUpperCase() || !/\p{L}{2}/u.test(text)) return text;
+    return text.toLowerCase().replace(/(^|[\s'-])(\p{L})/gu, (m, sep, ch) => sep + ch.toUpperCase());
+  }
+
   function renderResults() {
     const results = rankedResults();
     const count = (rec) => results.filter(r => r.recommendation === rec).length;
@@ -591,7 +598,7 @@
 
     $('candidates').innerHTML = results.map((c, i) => {
       const badge = BADGE[c.recommendation] || 'error';
-      const name = c.candidate_name && c.candidate_name !== 'Unknown' ? c.candidate_name : (c.filename || 'Unknown candidate');
+      const name = c.candidate_name && c.candidate_name !== 'Unknown' ? displayName(c.candidate_name) : (c.filename || 'Unknown candidate');
       const list = (items, sign) => (items && items.length)
         ? `<ul>${items.map(t => `<li><span class="sign ${sign === '+' ? 'plus' : 'minus'}">${sign === '+' ? '+' : '−'}</span><span>${esc(t)}</span></li>`).join('')}</ul>`
         : '<p style="color:var(--muted);font-size:14px">None noted.</p>';
