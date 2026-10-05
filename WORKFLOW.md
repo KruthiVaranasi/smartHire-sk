@@ -1,345 +1,166 @@
-# Complete Workflow Documentation
+# How SmartHire Works
 
-## 📋 3-Step Process
+SmartHire is **stateless**: the server stores nothing about a screening. The browser keeps the
+resumes' text, the questions, HR's answers and the scores for the session, and sends each API
+call what it needs. Results are kept by downloading a CSV or saving them to Google Sheets at the end.
 
-### **Step 1: Upload Resumes**
+```
+Browser (public/app.html)                         API (Vercel functions)
+─────────────────────────                         ──────────────────────
+1. HR adds PDFs or a zip ───── PDFs, 3 per call ──► POST /api/upload-resume
+   (zips unpacked in the browser)   ◄── text + id ─  extracts text, nothing saved
 
-**Endpoint:** `POST /api/upload-resume`
+2. HR enters role + JD ───────────── { jd } ──────► POST /api/generate-questions
+   HR answers 3-8 questions  ◄──── questions ──────  Gemini writes questions for this JD
 
-**Purpose:** HR uploads the resumes for a role: one PDF at a time, several PDFs at once, or a `.zip` of PDFs
+3. Scoring ──── { jd, answers, 3 resumes } per call ► POST /api/score-resumes
+   (repeats until all are scored) ◄── scores ──────  Gemini scores each resume
+   Browser ranks the results
 
-**Input:** (form-data)
-- `resume_pdf`: a PDF or a `.zip` of PDFs. Repeat the field to send several files in one request
-- `jd`: Job description text
-- `role`: Job title / role name
+4. Keep the results
+   · Download CSV (in the browser)
+   · Save to Google Sheet ──── ranked results ─────► POST /api/save-results
+                              ◄── sheet link ─────  new tab + email summary (if configured)
+```
 
-**What happens:**
-1. Zips are unpacked: every PDF inside is used, including in subfolders (max 100 PDFs; `__MACOSX` and hidden files are skipped)
-2. Text is extracted from each PDF. A PDF with no readable text (empty, corrupt, or a scanned image) is reported as failed; the others still go through
-3. One row per resume is saved to Google Sheets under a tab named `{role}`: jd, resume, uploadedAt, role and filename
+Every call needs a session when `APP_PASSWORD` is set (see [Sign-in](#sign-in)).
 
-**Size limit:** Vercel rejects request bodies over about **4.5 MB**, so a zip sent directly must stay under that (roughly 15-30 typical resumes). For bigger batches, unzip in the browser and upload the PDFs a few per request.
+---
 
-**Response:**
+## POST /api/upload-resume
+
+Extracts the text from resume PDFs. Nothing is stored.
+
+**Request:** `multipart/form-data` with one or more `resume_pdf` files. Each can be a PDF or a `.zip` of PDFs (subfolders are fine, up to 100 PDFs). Vercel rejects bodies over about 4.5 MB, so send a few PDFs per request; the web app unzips in the browser and sends 3 at a time.
+
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "4 resume(s) uploaded, 1 failed",
+  "message": "3 resume(s) read, 1 failed",
   "data": {
-    "role": "Senior Engineer",
-    "uploaded": 4,
-    "failed": 1,
+    "uploaded": 3, "duplicates": 0, "failed": 1,
     "files": [
-      { "filename": "john_doe.pdf", "status": "ok", "resumeLength": 5420 },
+      { "filename": "jane_doe.pdf", "status": "ok", "id": "3f9a…", "resumeLength": 5420, "resume": "JANE DOE\nSenior Engineer\n…" },
       { "filename": "scan.pdf", "status": "failed", "error": "No readable text in PDF. It may be empty, corrupt, or a scanned image." }
-    ],
-    "uploadedAt": "2026-10-05T10:30:00.000Z",
-    "jd_preview": "We are looking for..."
+    ]
   }
 }
 ```
 
-When exactly one file is uploaded, `data` also has `filename` and `resumeLength`. If no file could be read, the response is a `400` with the same `files` report.
-
-**Lovable calls this:** For each resume, or once with a zip
+- `id` is a fingerprint of the resume's text: the same resume gets the same `id` whatever the file is called. Use it to skip resumes you already have.
+- `status: "duplicate"` means the same resume appeared twice in this request.
+- If no file could be read, the response is `400` with the same `files` report.
 
 ---
 
-### **Step 2: Generate Questions (Once per role)**
+## POST /api/generate-questions
 
-**Endpoint:** `POST /api/generate-questions`
+**Request:** `{ "jd": "<job description>" }`
 
-**Purpose:** After all resumes are uploaded, generate clarifying questions for HR
-
-**Input:**
-```json
-{
-  "role": "Senior Engineer"
-}
-```
-
-**What happens:**
-1. Reads the JD from the first row of the role's sheet tab
-2. Gemini writes **3 to 8** questions tailored to that JD: fewer for a clear, specific JD, more for a vague or senior one. Topics include role context and urgency, must-have skills, team and working style, deal-breakers, and anything else the JD leaves ambiguous
-3. Writes a readable copy of the questions to column E of every row
-
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "Questions generated successfully",
   "data": {
-    "role": "Senior Engineer",
-    "total_resumes": 10,
-    "question_count": 5,
+    "question_count": 4,
     "questions": [
-      {
-        "title": "Primary Language and Stack Focus",
-        "question": "The JD lists Node.js, Python, Java, and Go. Is there a single primary language required for Day 1 productivity...?"
-      },
-      {
-        "title": "Urgency and First 90 Days Deliverables",
-        "question": "Why does this role exist right now, and what must the candidate deliver within their first 90 days?"
-      }
-    ],
-    "jd_preview": "We are looking for..."
+      { "title": "Primary Language and Tech Stack", "question": "The JD lists Node.js, Python, Java and Go. Is one of them required on day 1…?" }
+    ]
   }
 }
 ```
 
-The number of questions varies, so show however many come back.
-
-**Lovable calls this:** Once, after HR finishes uploading all resumes
+The AI picks 3-8 questions depending on how clear the JD is, so the count varies. Generate them once per screening and keep them; each call returns a new set.
 
 ---
 
-### **Step 3: Screen & Rank**
+## POST /api/score-resumes
 
-**Endpoint:** `POST /api/submit-screening`
+Scores up to 5 resumes per call (the web app sends 3). Call it repeatedly until every resume is scored, then rank the combined results by `score`.
 
-**Purpose:** HR answers the questions; the system scores and ranks every candidate
-
-**Input:** one `{ question, answer }` per question from step 2, in the same order
+**Request:**
 ```json
 {
-  "role": "Senior Engineer",
-  "answers": [
-    { "question": "The JD lists Node.js, Python, Java, and Go. Is there a single primary language...?", "answer": "Node.js or Python, 5+ years in production" },
-    { "question": "Why does this role exist right now...?", "answer": "Critical for our Q2 payments launch" }
-  ],
-  "force": false
+  "jd": "<job description>",
+  "answers": [ { "question": "<question text>", "answer": "<HR's answer>" } ],
+  "resumes": [ { "id": "3f9a…", "filename": "jane_doe.pdf", "resume": "<text from upload-resume>" } ]
 }
 ```
 
-- Every question needs a non-empty answer (max 10). A missing answer returns `400` with `missing_answers: [2]` (question numbers).
-- `force` is optional. Set it to `true` on the **first** call only, to re-score resumes that were already scored with these same answers.
-- Older frontends can still send `answer1`…`answer4` (the original four fixed questions); they are converted automatically.
-
-**What happens:**
-1. Reads all resumes from Google Sheets for this role
-2. Picks the resumes not yet scored with these exact answers (changing any answer re-scores everything)
-3. Scores them with Gemini AI, 3 at a time, for up to ~35 seconds so the call stays inside Vercel's 60s limit. HR's answers are treated as the real priorities and override the JD where they disagree
-4. Produces for each resume: candidate name, score (0-100), strengths, gaps, justification, recommendation and interview priority. A resume the AI can't score gets score 0 and recommendation `Error`
-5. Ranks every resume scored so far and writes columns F–M and O (columns A–E and N are never touched)
-6. When the last resume is scored, sends the email summary to HR (once)
-
-**Call it in a loop.** Large batches take several calls. Repeat the same request (without `force`) until `data.done` is `true`; `data.remaining` shows progress.
-
-**Response:**
+**Response (200):**
 ```json
 {
   "success": true,
-  "message": "Screening completed successfully",
   "data": {
-    "done": true,
-    "remaining": 0,
-    "scored_this_call": 4,
-    "total_candidates": 10,
-    "email_sent": true,
-    "summary": {
-      "strong_yes": 2,
-      "yes": 4,
-      "maybe": 3,
-      "no": 1,
-      "failed": 0
-    },
-    "top_5": [
-      { "rank": 1, "candidate_name": "Deep M. Mehta", "filename": "deep_mehta.pdf", "score": 85, "recommendation": "Strong Yes" },
-      { "rank": 2, "candidate_name": "Charles McTurland", "filename": "charles.pdf", "score": 78, "recommendation": "Yes" }
+    "scored": 3, "failed": 0,
+    "results": [
+      {
+        "id": "3f9a…", "filename": "jane_doe.pdf", "candidate_name": "Jane Doe",
+        "score": 86, "score_breakdown": { "technical_skills": 36, "experience": 26, "cultural_fit": 16, "potential": 8 },
+        "strengths": ["…"], "gaps": ["…"], "justification": "…",
+        "recommendation": "Strong Yes", "interview_priority": "High"
+      }
     ]
   }
 }
 ```
 
-**Lovable calls this:** After HR answers the questions, repeating until `data.done` is `true`
+- Results come back in the same order as `resumes`.
+- A resume the AI couldn't score comes back with `recommendation: "Error"`, score 0 and the reason in `justification`; the others in the batch are unaffected.
+- `400` responses explain what's wrong, e.g. `{ "error": "Every question needs an answer", "missing_answers": [2] }`.
 
 ---
 
-## 🖥️ What the Lovable frontend needs
+## POST /api/save-results
 
-| Change | Required? | What to do |
-|---|---|---|
-| Screening loop | **Yes** | Repeat `POST /api/submit-screening` with the same body until `data.done` is `true`. Show `data.remaining` as progress |
-| Variable questions | **Yes** | Render one answer box per item in `data.questions` (3-8), then send `answers: [{ question, answer }]` |
-| Candidate names | Optional | Show `candidate_name` and `filename` from `top_5` |
-| Upload report | Optional | Show `data.files` so HR can see which PDFs failed and why |
-| Zip upload | Optional | Allow `.zip` in the file picker for small batches (under ~4.5 MB). For bigger ones, unzip in the browser (e.g. JSZip) and upload the PDFs a few at a time |
-| API key | Only if `API_KEY` is set | Call the API from a server-side function that holds the key, never from browser code |
+Optional. Saves a finished screening as a **new tab** in the Google Sheet (when Sheets is configured) and emails HR a summary with a link to it (when Gmail is configured). Resume text is never saved.
 
----
-
-## 📊 Complete Google Sheets Schema
-
-Each role has its own sheet tab (tab name = role name). The tab and its header row are created automatically, and the header row is refreshed on every upload.
-
-### **After Step 1 (Upload):**
-| Col | Name | Type | Example |
-|-----|------|------|---------|
-| A | jd | text | "We are looking for a Senior Engineer with..." |
-| B | resume | text | "JOHN DOE\nSenior Software Engineer..." |
-| C | uploadedAt | timestamp | "2026-10-05T10:30:00.000Z" |
-| D | role | text | "Senior Engineer" |
-| N | filename | text | "john_doe.pdf" |
-
-### **After Step 2 (Questions):**
-| Col | Name | Type | Example |
-|-----|------|------|---------|
-| E | jd_clarifications | text | "1. Primary Language and Stack Focus\nThe JD lists..." |
-
-### **After Step 3 (Screening):**
-| Col | Name | Type | Example |
-|-----|------|------|---------|
-| F | rank | number | 1 |
-| G | jd_clarification | JSON string | '[{"question":"...","answer":"..."}]' (the HR answers this row was scored with) |
-| H | score | number | 92 |
-| I | strengths | JSON array | '["7 years Python experience","Led ML team"]' |
-| J | gaps | JSON array | '["No Kubernetes experience","Limited AWS"]' |
-| K | justification | text | "Strong candidate with extensive ML background..." |
-| L | recommendation | text | "Strong Yes" (or "Error" if the AI couldn't score it) |
-| M | interview_priority | text | "High" |
-| O | candidate_name | text | "John Doe" |
-
----
-
-## 📧 Email Sent to HR (After Step 3)
-
-Sent once, when the last resume of a run is scored, and only if Gmail is configured.
-
-**Subject:** ✅ Resume Screening Complete - 10 Candidates Analyzed (Senior Engineer)
-
-**Body:**
-```
-Hi HR Team,
-
-Resume screening has completed successfully for role: Senior Engineer
-
-📊 SUMMARY:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total Candidates: 10
-
-Recommendations:
-  ✅ Strong Yes: 2
-  ✓  Yes: 4
-  ⚠️  Maybe: 3
-  ❌ No: 1
-
-🏆 TOP CANDIDATES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  1. Deep M. Mehta (deep_mehta.pdf): 85/100, Strong Yes
-  2. Charles McTurland (charles.pdf): 78/100, Yes
-  ...
-
-📋 NEXT STEPS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Review detailed results in Google Sheet:
-   https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit
-...
+**Request:**
+```json
+{
+  "role": "Senior Backend Engineer",
+  "jd": "<job description>",
+  "answers": [ { "question": "…", "answer": "…" } ],
+  "results": [ { "candidate_name": "…", "filename": "…", "score": 86, "recommendation": "…", "interview_priority": "…", "strengths": ["…"], "gaps": ["…"], "justification": "…" } ]
+}
 ```
 
-If some resumes couldn't be scored, the summary adds a "⛔ Could not be scored: N" line.
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "saved_to_sheet": true,
+    "sheet_url": "https://docs.google.com/spreadsheets/d/<id>/edit#gid=123",
+    "tab": "Senior Backend Engineer · 2026-10-05 15.20",
+    "email_sent": true
+  }
+}
+```
+
+The tab holds the role, date, JD and each question with HR's answer, then one row per candidate: rank, name, file, score, recommendation, interview priority, strengths, gaps and justification.
 
 ---
 
-## 🔄 Complete Flow Diagram
+## Sign-in
 
-```
-┌─────────────────────────────────────────────────┐
-│  LOVABLE FRONTEND                               │
-└─────────────────────────────────────────────────┘
-                    ↓
-   [Upload PDFs one by one, or a .zip]
-                    ↓
-POST /api/upload-resume   (once per file or batch)
-                    ↓
-   ┌────────────────────────────────┐
-   │  Google Sheets                 │
-   │  Columns A-D, N                │
-   │  (jd, resume, date, role, file)│
-   └────────────────────────────────┘
-                    ↓
-   [HR clicks "Generate Questions"]
-                    ↓
-POST /api/generate-questions
-                    ↓
-   ┌────────────────────────────┐
-   │  Google Sheets             │
-   │  Column E (questions)      │
-   └────────────────────────────┘
-                    ↓
-   [Lovable shows the 3-8 questions to HR]
-                    ↓
-   [HR answers them]
-                    ↓
-POST /api/submit-screening   ← repeat until data.done
-                    ↓
-   ┌────────────────────────────┐
-   │  Gemini AI scores          │
-   │  3 resumes at a time       │
-   └────────────────────────────┘
-                    ↓
-   ┌────────────────────────────┐
-   │  Google Sheets             │
-   │  Columns F-M, O            │
-   │  (rank, score, name, ...)  │
-   └────────────────────────────┘
-                    ↓
-   ┌────────────────────────────┐
-   │  Email sent to HR (once)   │
-   └────────────────────────────┘
-                    ↓
-   [Lovable shows summary]
-```
+When `APP_PASSWORD` is set, every endpoint except `/api/health` and `/api/login` needs a session:
+
+1. `POST /api/login` with `{ "password": "…" }` returns `{ "token": "…" }` (valid 12 hours).
+2. Send `Authorization: Bearer <token>` on every call.
+
+A `401` with `"auth": "password"` means the session is missing or expired. Server-to-server callers can use `API_KEY` in an `x-api-key` header instead.
+
+## GET /api/health
+
+Public. Reports which features are configured (`sheets_configured`, `gmail_configured`, `password_required`, …) so a front end can show or hide them.
 
 ---
 
-## 🧪 Testing the Flow
-
-### Locally
+## Testing locally
 
 ```bash
-npm run dev     # terminal 1: local server on http://localhost:3000
-npm test        # terminal 2: uploads every PDF in ../samples, generates questions, screens
+npm run dev     # terminal 1: app + API on http://localhost:3000
+npm test        # terminal 2: reads the PDFs in ../samples, asks questions, scores, saves (if configured)
 ```
-
-### With curl
-
-**1. Upload resumes (a PDF or a zip):**
-```bash
-curl -X POST https://your-vercel-url.vercel.app/api/upload-resume \
-  -F "resume_pdf=@resumes.zip" \
-  -F "jd=We are looking for a Senior Engineer..." \
-  -F "role=Senior Engineer"
-```
-
-**2. Generate questions:**
-```bash
-curl -X POST https://your-vercel-url.vercel.app/api/generate-questions \
-  -H "Content-Type: application/json" \
-  -d '{"role":"Senior Engineer"}'
-```
-
-**3. Submit screening (repeat until "done": true):**
-```bash
-curl -X POST https://your-vercel-url.vercel.app/api/submit-screening \
-  -H "Content-Type: application/json" \
-  -d '{
-    "role": "Senior Engineer",
-    "answers": [
-      { "question": "<question 1 from step 2>", "answer": "Critical for Q2 launch" },
-      { "question": "<question 2 from step 2>", "answer": "5+ years Python, ML experience" }
-    ]
-  }'
-```
-
-If `API_KEY` is set on the server, add `-H "x-api-key: <your key>"` to each request.
-
----
-
-## ✅ Checklist for HR
-
-- [ ] Upload all resumes for a role (Step 1: one by one or as a zip)
-- [ ] Check the upload report for PDFs that couldn't be read
-- [ ] Click "Generate Questions" (Step 2: once)
-- [ ] Answer every question (Step 3)
-- [ ] Review email and Google Sheet results
-- [ ] Schedule interviews with top candidates

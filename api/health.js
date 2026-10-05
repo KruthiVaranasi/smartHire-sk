@@ -1,4 +1,5 @@
 const { prepareRequest } = require('../lib/http');
+const { sheetsConfigured } = require('../lib/sheets-client');
 
 module.exports = async (req, res) => {
   // Public: no sign-in needed, so uptime checks and the web app's login screen work
@@ -12,7 +13,8 @@ module.exports = async (req, res) => {
       gemini_model: process.env.GEMINI_MODEL || 'gemini-3.8-flash (default)',
       google_sheet_id: !!process.env.GOOGLE_SHEET_ID,
       google_service_account: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      gmail_configured: !!process.env.GMAIL_USER,
+      gmail_configured: !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD),
+      sheets_configured: sheetsConfigured(),
       api_key_required: !!process.env.API_KEY,
       password_required: !!process.env.APP_PASSWORD,
       allowed_origins: process.env.ALLOWED_ORIGINS ? 'restricted' : 'any'

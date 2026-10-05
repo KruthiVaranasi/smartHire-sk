@@ -1,11 +1,12 @@
-// SmartHire workspace: sign-in, upload, clarifying questions, screening and results.
-// Talks to the API on the same origin (/api/...). State is kept in sessionStorage so a
-// page refresh doesn't lose the role, the questions or the results.
+// SmartHire workspace: sign-in, upload, clarifying questions, scoring, results and export.
+// The server stores nothing about a screening: the browser keeps the resumes' text,
+// questions, answers and scores (in sessionStorage, so a refresh doesn't lose them)
+// and sends what each step needs.
 
 (() => {
   const API = '/api';
-  const BATCH_SIZE = 3;            // PDFs per upload request (stays well under Vercel's 4.5 MB body limit)
-  const MAX_SCREENING_CALLS = 40;  // safety stop for the screening loop
+  const UPLOAD_BATCH = 3;          // PDFs per upload request (well under Vercel's 4.5 MB body limit)
+  const SCORE_BATCH = 3;           // resumes per scoring request (finishes well inside 60s)
   const REQUEST_TIMEOUT_MS = 75000;
   const JSZIP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
   const STATE_KEY = 'smarthire.state';
@@ -13,7 +14,7 @@
 
   const $ = (id) => document.getElementById(id);
 
-  // ---------- Storage (wrapped: private windows can block it) ----------
+  // ---------- Storage (wrapped: private windows can block it, and it has a size limit) ----------
 
   const store = {
     get(key) { try { return JSON.parse(sessionStorage.getItem(key)); } catch { return null; } },
@@ -25,19 +26,25 @@
     step: 1,
     role: '',
     jd: '',
-    uploads: [],        // [{ name, size, status: 'ok' | 'failed', error }]
+    resumes: [],        // [{ id, filename, size, text }]: resumes read successfully
+    uploads: [],        // [{ name, size, status: 'ok' | 'duplicate' | 'failed', error, id }]: what HR sees
     questions: null,    // [{ title, question }]
+    questionsJd: '',    // the JD the questions were written for
     answers: [],        // strings, same order as questions
-    results: null       // last finished screening response data
+    scores: { key: '', byId: {} },   // results for the current JD + answers, by resume id
+    saved: null         // { sheet_url, tab, email_sent } after "Save results"
   });
 
   let state = Object.assign(freshState(), store.get(STATE_KEY) || {});
   let token = store.get(TOKEN_KEY);
-  let queue = [];       // files picked but not uploaded yet: { id, file, name, size, status, error }
+  let queue = [];       // files picked but not read yet: { id, file, name, size, status }
   let busy = false;
-  let passwordRequired = false;
+  let config = { passwordRequired: false, sheets: false, email: false };
 
   const save = () => store.set(STATE_KEY, state);
+
+  const STATUS_LABEL = { ok: 'Ready', duplicate: 'Already added', failed: 'Failed' };
+  const BADGE = { 'Strong Yes': 'strong-yes', 'Yes': 'yes', 'Maybe': 'maybe', 'No': 'no' };
 
   // ---------- Helpers ----------
 
@@ -100,7 +107,7 @@
   function showWorkspace() {
     $('gate').hidden = true;
     $('workspace').hidden = false;
-    $('sign-out').hidden = !passwordRequired;
+    $('sign-out').hidden = !config.passwordRequired;
     render();
   }
 
@@ -129,6 +136,10 @@
 
   // ---------- Navigation ----------
 
+  // Requests only start on their own while the workspace is showing; behind the
+  // sign-in screen a 401 would otherwise trigger the same request again and again
+  const workspaceVisible = () => !$('workspace').hidden;
+
   function goTo(step) {
     state.step = step;
     save();
@@ -137,18 +148,16 @@
   }
 
   function render() {
-    const uploadedOk = state.uploads.filter(u => u.status === 'ok').length;
-
     document.querySelectorAll('.stepper li').forEach((li) => {
       const n = Number(li.dataset.step);
       li.classList.toggle('active', n === state.step);
-      li.classList.toggle('done', n < state.step || (n === 3 && state.results && state.step !== 3));
+      li.classList.toggle('done', n < state.step);
     });
     [1, 2, 3].forEach((n) => { $(`step-${n}`).hidden = n !== state.step; });
 
-    $('role-pill').classList.toggle('show', Boolean(state.role && uploadedOk));
+    $('role-pill').classList.toggle('show', Boolean(state.role && state.step > 1));
     $('role-pill-name').textContent = state.role;
-    $('new-screening').hidden = !(uploadedOk || queue.length || state.role);
+    $('new-screening').hidden = !(state.resumes.length || queue.length || state.role || state.jd);
 
     if (state.step === 1) renderStep1();
     if (state.step === 2) renderStep2();
@@ -157,8 +166,8 @@
 
   function newScreening() {
     if (busy) return;
-    const hasWork = state.uploads.length || queue.length || state.questions;
-    if (hasWork && !confirm('Start a new screening? The current results stay in your Google Sheet.')) return;
+    const hasWork = state.resumes.length || queue.length || state.questions;
+    if (hasWork && !confirm('Start a new screening? The current resumes, answers and results will be cleared from this browser.')) return;
     state = freshState();
     queue = [];
     save();
@@ -169,56 +178,65 @@
   $('new-screening').addEventListener('click', newScreening);
   $('new-screening-2').addEventListener('click', newScreening);
 
-  // ---------- Step 1: role and resumes ----------
+  // ---------- Step 1: role, JD and resumes ----------
 
   $('role').addEventListener('input', () => { state.role = $('role').value; save(); renderStep1(); });
   $('jd').addEventListener('input', () => { state.jd = $('jd').value; save(); renderStep1(); });
 
   function renderStep1() {
-    const locked = state.uploads.some(u => u.status === 'ok');
     // Only write when different, so typing in the middle doesn't move the cursor
     if ($('role').value !== state.role) $('role').value = state.role;
     if ($('jd').value !== state.jd) $('jd').value = state.jd;
-    // Once resumes are stored under this role and JD, changing them would split the data
-    $('role').disabled = locked;
-    $('jd').disabled = locked;
 
     const items = [
       ...state.uploads.map(u => ({ ...u, done: true })),
       ...queue
     ];
-    $('file-list').innerHTML = items.map(item => `
+    $('file-list').innerHTML = items.map((item, index) => `
       <li class="file-item">
         <span class="file-icon">PDF</span>
         <div style="min-width:0">
           <div class="file-name" title="${esc(item.name)}">${esc(item.name)}</div>
-          ${item.error ? `<div class="file-error">${esc(item.error)}</div>` : ''}
+          ${item.error && item.status === 'failed' ? `<div class="file-error">${esc(item.error)}</div>` : ''}
         </div>
         <span class="file-size">${item.size ? formatSize(item.size) : ''}</span>
-        ${item.done
-          ? `<span class="file-status ${item.status}">${item.status === 'ok' ? 'Uploaded' : 'Failed'}</span>`
-          : item.status === 'uploading'
-            ? '<span class="file-status uploading">Uploading…</span>'
-            : `<button class="icon-btn" type="button" data-remove="${item.id}" aria-label="Remove ${esc(item.name)}"><svg viewBox="0 0 14 14" fill="none"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>`}
+        ${item.status === 'uploading'
+          ? '<span class="file-status uploading">Reading…</span>'
+          : `<span style="display:flex;align-items:center;gap:6px">
+               ${item.done ? `<span class="file-status ${item.status}">${STATUS_LABEL[item.status] || 'Failed'}</span>` : '<span class="file-status queued">Queued</span>'}
+               <button class="icon-btn" type="button" ${item.done ? `data-remove-upload="${index}"` : `data-remove="${item.id}"`} aria-label="Remove ${esc(item.name)}"><svg viewBox="0 0 14 14" fill="none"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+             </span>`}
       </li>`).join('');
 
-    const ok = state.uploads.filter(u => u.status === 'ok').length;
+    const ready = state.resumes.length;
     const failed = state.uploads.filter(u => u.status === 'failed').length;
     const waiting = queue.filter(q => q.status === 'queued').length;
-    $('upload-summary').textContent = ok || failed || waiting
-      ? [ok && `${ok} uploaded`, failed && `${failed} failed`, waiting && `${waiting} ready to upload`].filter(Boolean).join(' · ')
-      : 'No resumes uploaded yet.';
+    $('upload-summary').textContent = ready || failed || waiting
+      ? [ready && `${ready} resume${ready === 1 ? '' : 's'} ready`, failed && `${failed} failed`, waiting && `${waiting} to read`].filter(Boolean).join(' · ')
+      : 'No resumes added yet.';
 
+    $('upload-btn').hidden = waiting === 0 && !busy;
     $('upload-btn').disabled = busy || waiting === 0;
-    $('upload-btn').textContent = busy ? 'Uploading…' : waiting ? `Upload ${waiting} resume${waiting === 1 ? '' : 's'}` : 'Upload resumes';
-    $('to-step-2').disabled = busy || ok === 0;
+    $('upload-btn').textContent = busy ? 'Reading…' : `Read ${waiting} resume${waiting === 1 ? '' : 's'}`;
+    $('to-step-2').disabled = busy || ready === 0 || waiting > 0;
   }
 
   $('file-list').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-remove]');
-    if (!button) return;
-    queue = queue.filter(q => q.id !== button.dataset.remove);
-    renderStep1();
+    if (busy) return;
+    const queued = event.target.closest('[data-remove]');
+    if (queued) {
+      queue = queue.filter(q => q.id !== queued.dataset.remove);
+    }
+    const uploaded = event.target.closest('[data-remove-upload]');
+    if (uploaded) {
+      const [removed] = state.uploads.splice(Number(uploaded.dataset.removeUpload), 1);
+      if (removed && removed.status === 'ok') {
+        state.resumes = state.resumes.filter(r => r.id !== removed.id);
+        state.saved = null;
+      }
+      save();
+    }
+    render();
   });
 
   // Drag and drop
@@ -235,7 +253,7 @@
       const script = document.createElement('script');
       script.src = JSZIP_URL;
       script.onload = () => resolve(window.JSZip);
-      script.onerror = () => { jszipLoading = null; reject(new Error('Could not load the zip reader. Check your connection, or upload the PDFs directly.')); };
+      script.onerror = () => { jszipLoading = null; reject(new Error('Could not load the zip reader. Check your connection, or add the PDFs directly.')); };
       document.head.appendChild(script);
     });
     return jszipLoading;
@@ -245,8 +263,8 @@
   async function addFiles(fileList) {
     hideError($('step1-error'));
     const skipped = [];
-    // Skip files already queued or uploaded; a failed file can be added again
-    const known = new Set([...queue, ...state.uploads.filter(u => u.status === 'ok')].map(f => `${f.name}|${f.size}`));
+    // Skip files already queued or read; a failed file can be added again
+    const known = new Set([...queue, ...state.uploads.filter(u => u.status !== 'failed')].map(f => `${f.name}|${f.size}`));
 
     const enqueue = (file, name) => {
       const key = `${name}|${file.size}`;
@@ -281,40 +299,29 @@
     }
 
     if (skipped.length) showError($('step1-error'), `Skipped: ${skipped.join('; ')}.`);
-    renderStep1();
+    render();
+    // Read new files straight away
+    if (queue.some(q => q.status === 'queued') && !busy) uploadQueued();
   }
 
   $('upload-btn').addEventListener('click', uploadQueued);
 
   async function uploadQueued() {
     hideError($('step1-error'));
-    state.role = $('role').value.trim();
-    state.jd = $('jd').value.trim();
-    $('role').classList.toggle('invalid', !state.role);
-    $('jd').classList.toggle('invalid', state.jd.length < 30);
-    if (!state.role || state.jd.length < 30) {
-      showError($('step1-error'), !state.role ? 'Add a role title first.' : 'Paste the full job description (at least a few sentences).');
-      return;
-    }
-    save();
-
     busy = true;
     const pending = queue.filter(q => q.status === 'queued');
-    for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-      const batch = pending.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < pending.length; i += UPLOAD_BATCH) {
+      const batch = pending.slice(i, i + UPLOAD_BATCH);
       batch.forEach(item => { item.status = 'uploading'; });
       renderStep1();
 
       const form = new FormData();
-      form.append('jd', state.jd);
-      form.append('role', state.role);
       batch.forEach(item => form.append('resume_pdf', item.file, item.name));
 
       let report = null;
       let batchError = null;
       try {
-        const data = await api('/upload-resume', { form });
-        report = data.data.files;
+        report = (await api('/upload-resume', { form })).data.files;
       } catch (error) {
         if (error instanceof AuthRequired) { batch.forEach(item => { item.status = 'queued'; }); busy = false; return; }
         report = error.data && error.data.files;   // 400 "none readable" still has a per-file report
@@ -324,11 +331,19 @@
       // The server reports files in the order they were sent
       batch.forEach((item, index) => {
         const result = report && report[index];
+        let status = result ? result.status : 'failed';
+        // The same resume content already added under another name counts as a duplicate
+        if (status === 'ok' && state.resumes.some(r => r.id === result.id)) status = 'duplicate';
+        if (status === 'ok') {
+          state.resumes.push({ id: result.id, filename: item.name, size: item.size, text: result.resume });
+          state.saved = null;
+        }
         state.uploads.push({
           name: item.name,
           size: item.size,
-          status: result ? result.status : 'failed',
-          error: result ? (result.error || '') : batchError
+          status,
+          id: result ? result.id : null,
+          error: status === 'failed' ? (result ? result.error : batchError) : ''
         });
       });
       queue = queue.filter(q => !batch.includes(q));
@@ -339,25 +354,39 @@
     render();
   }
 
-  $('to-step-2').addEventListener('click', () => goTo(2));
+  $('to-step-2').addEventListener('click', () => {
+    hideError($('step1-error'));
+    state.role = $('role').value.trim();
+    state.jd = $('jd').value.trim();
+    $('role').classList.toggle('invalid', !state.role);
+    $('jd').classList.toggle('invalid', state.jd.length < 30);
+    if (!state.role || state.jd.length < 30) {
+      showError($('step1-error'), !state.role ? 'Add a role title first.' : 'Paste the full job description (at least a few sentences).');
+      return;
+    }
+    save();
+    goTo(2);
+  });
 
   // ---------- Step 2: clarifying questions ----------
 
   let generating = false;
   let generationFailed = false;   // stops automatic retries; the user retries with the button
 
-  // Requests only start on their own while the workspace is showing; behind the
-  // sign-in screen a 401 would otherwise trigger the same request again and again
-  const workspaceVisible = () => !$('workspace').hidden;
-
   function renderStep2() {
+    // Questions belong to a JD: if the JD was edited, write new ones
+    if (state.questions && state.questionsJd !== state.jd) {
+      state.questions = null;
+      state.answers = [];
+      save();
+    }
     if (!state.questions && !generating && !generationFailed && workspaceVisible()) generateQuestions();
     $('questions-loading').hidden = !generating;
     $('regenerate').hidden = generating || (!state.questions && !generationFailed);
     $('regenerate').textContent = state.questions ? 'New questions' : 'Try again';
 
     const list = $('questions');
-    if (!state.questions) { list.innerHTML = ''; updateAnswerState(); return; }
+    if (!state.questions) { list.innerHTML = ''; list.dataset.for = ''; updateAnswerState(); return; }
 
     // Build once per question set; keep focus and typing intact afterwards
     if (list.dataset.for !== JSON.stringify(state.questions)) {
@@ -387,13 +416,13 @@
     });
     $('answer-count').textContent = questions.length ? `${answered} of ${questions.length} answered` : '';
     $('start-screening').disabled = generating || !questions.length || answered < questions.length;
+    $('start-screening').innerHTML = `Screen ${state.resumes.length} candidate${state.resumes.length === 1 ? '' : 's'} <span class="arrow" aria-hidden="true">→</span>`;
   }
 
   $('questions').addEventListener('input', (event) => {
     const index = event.target.dataset.index;
     if (index === undefined) return;
     state.answers[Number(index)] = event.target.value;
-    event.target.classList.remove('invalid');
     save();
     updateAnswerState();
   });
@@ -404,16 +433,14 @@
     hideError($('step2-error'));
     renderStep2();
     try {
-      const data = await api('/generate-questions', { json: { role: state.role } });
+      const data = await api('/generate-questions', { json: { jd: state.jd } });
       state.questions = data.data.questions;
+      state.questionsJd = state.jd;
       state.answers = state.questions.map(() => '');
-      state.results = null;
       save();
     } catch (error) {
       generationFailed = !(error instanceof AuthRequired);   // after sign-in, generate again automatically
-      if (generationFailed) {
-        showError($('step2-error'), error.status === 404 ? 'No resumes were found for this role. Go back and upload some first.' : error.message);
-      }
+      if (generationFailed) showError($('step2-error'), error.message);
     } finally {
       generating = false;
       renderStep2();
@@ -432,103 +459,121 @@
 
   $('start-screening').addEventListener('click', () => {
     goTo(3);
-    runScreening({ force: false });
+    runScreening();
   });
 
-  // ---------- Step 3: screening and results ----------
+  // ---------- Step 3: scoring and results ----------
 
   let screening = false;
 
-  function answersPayload() {
-    return state.questions.map((q, i) => ({ question: q.question, answer: (state.answers[i] || '').trim() }));
+  const answersPayload = () => state.questions.map((q, i) => ({ question: q.question, answer: (state.answers[i] || '').trim() }));
+
+  // Scores are only valid for the JD and answers they were made with
+  const scoresKey = () => JSON.stringify([state.jd, answersPayload()]);
+
+  function currentScores() {
+    if (state.scores.key !== scoresKey()) {
+      state.scores = { key: scoresKey(), byId: {} };
+      state.saved = null;
+      save();
+    }
+    return state.scores.byId;
   }
+
+  function rankedResults() {
+    const byId = currentScores();
+    return state.resumes
+      .filter(r => byId[r.id])
+      .map(r => ({ ...byId[r.id], filename: r.filename }))
+      .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || String(a.candidate_name).localeCompare(String(b.candidate_name)))
+      .map((r, i) => ({ ...r, rank: i + 1 }));
+  }
+
+  const pendingResumes = () => { const byId = currentScores(); return state.resumes.filter(r => !byId[r.id]); };
 
   function renderStep3() {
-    const showResults = Boolean(state.results) && !screening;
-    $('results-view').hidden = !showResults;
-    $('progress-view').hidden = showResults;
-    if (showResults) renderResults(state.results);
-    else if (!screening && workspaceVisible()) runScreening({ force: false });   // e.g. after a refresh mid-run
+    if (!state.questions) { goTo(2); return; }
+    const done = pendingResumes().length === 0 && state.resumes.length > 0;
+    $('results-view').hidden = !done || screening;
+    $('progress-view').hidden = done && !screening;
+    if (done && !screening) renderResults();
+    else if (!screening && workspaceVisible() && $('step3-error').hidden) runScreening();   // e.g. after a refresh mid-run
   }
 
-  function setProgress(total, remaining) {
-    const bar = $('progress');
-    if (!total) {
-      bar.classList.add('indeterminate');
-      $('progress-count').textContent = 'Starting…';
-      return;
-    }
-    const done = total - remaining;
-    bar.classList.remove('indeterminate');
-    $('progress-bar').style.width = `${Math.round((done / total) * 100)}%`;
+  function setProgress(done, total) {
+    $('progress').classList.toggle('indeterminate', done === 0);
+    $('progress-bar').style.width = total ? `${Math.round((done / total) * 100)}%` : '0';
     $('progress-count').textContent = `${done} of ${total} resumes scored`;
   }
 
-  async function runScreening({ force }) {
+  async function runScreening({ restart = false } = {}) {
     if (screening) return;
     if (!state.questions) { goTo(2); return; }
     screening = true;
-    state.results = null;
-    save();
+    if (restart) { state.scores = { key: scoresKey(), byId: {} }; state.saved = null; save(); }
     hideError($('step3-error'));
     $('retry-screening').hidden = true;
     $('progress-back').hidden = true;
     $('results-view').hidden = true;
     $('progress-view').hidden = false;
-    setProgress(0, 0);
 
+    const total = state.resumes.length;
     try {
-      for (let call = 1; call <= MAX_SCREENING_CALLS; call++) {
-        const data = (await api('/submit-screening', {
-          json: { role: state.role, answers: answersPayload(), force: force && call === 1 }
+      let pending = pendingResumes();
+      setProgress(total - pending.length, total);
+      while (pending.length) {
+        const batch = pending.slice(0, SCORE_BATCH);
+        const data = (await api('/score-resumes', {
+          json: {
+            jd: state.jd,
+            answers: answersPayload(),
+            resumes: batch.map(r => ({ id: r.id, filename: r.filename, resume: r.text }))
+          }
         })).data;
-        setProgress(data.total_candidates, data.remaining);
-        if (data.done) {
-          state.results = data;
-          save();
-          break;
-        }
+        data.results.forEach((result, i) => { state.scores.byId[batch[i].id] = result; });
+        save();
+        pending = pendingResumes();
+        setProgress(total - pending.length, total);
       }
-      if (!state.results) throw new Error('Screening is taking longer than expected. Press Retry to continue where it stopped.');
     } catch (error) {
-      if (error instanceof AuthRequired) { screening = false; return; }
+      screening = false;
+      if (error instanceof AuthRequired) return;
       showError($('step3-error'), error.status === 400 && error.data && error.data.missing_answers
         ? `Some answers are missing (question ${error.data.missing_answers.join(', ')}). Go back and fill them in.`
         : error.message);
       $('retry-screening').hidden = false;
       $('progress-back').hidden = false;
-    } finally {
-      screening = false;
+      return;
     }
-    if (state.results) render();
+    screening = false;
+    render();
   }
 
-  $('retry-screening').addEventListener('click', () => runScreening({ force: false }));
+  $('retry-screening').addEventListener('click', () => runScreening());
 
   $('rerun').addEventListener('click', () => {
     if (!confirm('Score every resume again with the current answers?')) return;
-    runScreening({ force: true });
+    runScreening({ restart: true });
   });
 
   $('edit-answers').addEventListener('click', () => goTo(2));
-  $('progress-back').addEventListener('click', () => goTo(2));
+  $('progress-back').addEventListener('click', () => { hideError($('step3-error')); goTo(2); });
 
-  const BADGE = { 'Strong Yes': 'strong-yes', 'Yes': 'yes', 'Maybe': 'maybe', 'No': 'no' };
+  function renderResults() {
+    const results = rankedResults();
+    const count = (rec) => results.filter(r => r.recommendation === rec).length;
+    const failed = count('Error');
 
-  function renderResults(data) {
-    const s = data.summary;
-    const total = data.total_candidates;
     $('results-intro').textContent =
-      `${total} candidate${total === 1 ? '' : 's'} for ${state.role}, scored against the job description and your ${state.questions ? state.questions.length : ''} answers.` +
-      (data.email_sent ? ' A summary was emailed to HR.' : '');
+      `${results.length} candidate${results.length === 1 ? '' : 's'} for ${state.role}, scored against the job description and your ${state.questions.length} answers.` +
+      (failed ? ` ${failed} resume${failed === 1 ? '' : 's'} could not be scored and ${failed === 1 ? 'is' : 'are'} listed as "Not scored"; use Re-run screening to try again.` : '');
 
     $('summary').innerHTML = `
-      <div class="summary-card total"><div class="n">${total}</div><div class="k">Screened</div></div>
-      ${[['Strong Yes', s.strong_yes], ['Yes', s.yes], ['Maybe', s.maybe], ['No', s.no]].map(([label, n]) => `
-        <div class="summary-card"><div class="n">${n}</div><div class="k"><span class="badge ${BADGE[label]}">${label}</span></div></div>`).join('')}`;
+      <div class="summary-card total"><div class="n">${results.length}</div><div class="k">Screened</div></div>
+      ${['Strong Yes', 'Yes', 'Maybe', 'No'].map(label => `
+        <div class="summary-card"><div class="n">${count(label)}</div><div class="k"><span class="badge ${BADGE[label]}">${label}</span></div></div>`).join('')}`;
 
-    const candidates = data.candidates || data.top_5 || [];
-    $('candidates').innerHTML = candidates.map((c, i) => {
+    $('candidates').innerHTML = results.map((c, i) => {
       const badge = BADGE[c.recommendation] || 'error';
       const name = c.candidate_name && c.candidate_name !== 'Unknown' ? c.candidate_name : (c.filename || 'Unknown candidate');
       const list = (items, sign) => (items && items.length)
@@ -547,20 +592,17 @@
             <svg class="chev" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M5 7l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <div class="candidate-detail" id="detail-${i}">
-            ${c.strengths || c.gaps ? `
             <div class="detail-grid">
               <div><h4>Strengths</h4>${list(c.strengths, '+')}</div>
               <div><h4>Gaps &amp; concerns</h4>${list(c.gaps, '−')}</div>
-            </div>` : ''}
+            </div>
             ${c.justification ? `<div class="justification"><h4>Why this score</h4>${esc(c.justification)}</div>` : ''}
             ${c.interview_priority ? `<p class="priority">Interview priority: <b>${esc(c.interview_priority)}</b></p>` : ''}
           </div>
         </li>`;
     }).join('');
 
-    if (s.failed) {
-      $('results-intro').textContent += ` ${s.failed} resume${s.failed === 1 ? '' : 's'} could not be scored and ${s.failed === 1 ? 'is' : 'are'} listed as "Not scored"; Re-run screening to try again.`;
-    }
+    renderSaveState();
   }
 
   $('candidates').addEventListener('click', (event) => {
@@ -572,17 +614,77 @@
     row.setAttribute('aria-expanded', String(open));
   });
 
+  // ---------- Export ----------
+
+  // Cells starting with = + - @ are prefixed so spreadsheet apps don't run them as formulas
+  const csvCell = (value) => {
+    let text = String(value ?? '');
+    if (/^[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  function resultsCsv() {
+    const header = ['Rank', 'Candidate', 'File', 'Score', 'Recommendation', 'Interview priority', 'Strengths', 'Gaps', 'Justification'];
+    const rows = rankedResults().map(r => [
+      r.rank, r.candidate_name, r.filename, r.score, r.recommendation, r.interview_priority,
+      (r.strengths || []).join(' | '), (r.gaps || []).join(' | '), r.justification
+    ]);
+    return '﻿' + [header, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
+  }
+
+  $('download-csv').addEventListener('click', () => {
+    const url = URL.createObjectURL(new Blob([resultsCsv()], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${state.role.replace(/[^\w\- ]+/g, '').trim() || 'screening'} - SmartHire results.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  function renderSaveState() {
+    const canSave = config.sheets || config.email;
+    $('save-results').hidden = !canSave || Boolean(state.saved);
+    $('save-results').textContent = config.sheets ? 'Save to Google Sheet' : 'Email summary to HR';
+    const notice = $('save-notice');
+    if (!state.saved) { notice.hidden = true; return; }
+    const parts = [];
+    if (state.saved.sheet_url) parts.push(`Saved to Google Sheets as “${esc(state.saved.tab)}”. <a href="${esc(state.saved.sheet_url)}" target="_blank" rel="noopener">Open sheet</a>`);
+    if (state.saved.email_sent) parts.push('Summary emailed to HR.');
+    notice.innerHTML = `<svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="7.2" stroke="currentColor" stroke-width="1.5"/><path d="M5.8 9.2l2.2 2.2 4.2-4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${parts.join(' ') || 'Saved.'}</span>`;
+    notice.hidden = false;
+  }
+
+  $('save-results').addEventListener('click', async () => {
+    hideError($('save-error'));
+    $('save-results').disabled = true;
+    $('save-results').textContent = 'Saving…';
+    try {
+      const data = await api('/save-results', {
+        json: { role: state.role, jd: state.jd, answers: answersPayload(), results: rankedResults() }
+      });
+      state.saved = data.data;
+      save();
+    } catch (error) {
+      if (!(error instanceof AuthRequired)) showError($('save-error'), error.message);
+    } finally {
+      $('save-results').disabled = false;
+      renderSaveState();
+    }
+  });
+
   // ---------- Start ----------
 
   async function init() {
     try {
-      const res = await fetch(`${API}/health`);
-      const health = await res.json();
-      passwordRequired = Boolean(health.env_check && health.env_check.password_required);
+      const health = await (await fetch(`${API}/health`)).json();
+      const env = health.env_check || {};
+      config = { passwordRequired: Boolean(env.password_required), sheets: Boolean(env.sheets_configured), email: Boolean(env.gmail_configured) };
     } catch {
-      passwordRequired = false;   // the first real request will tell us if sign-in is needed
+      // The first real request will tell us if sign-in is needed
     }
-    if (passwordRequired && !token) showGate();
+    if (config.passwordRequired && !token) showGate();
     else showWorkspace();
   }
 

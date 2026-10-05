@@ -2,7 +2,8 @@ const { prepareRequest } = require('../lib/http');
 const Busboy = require('busboy');
 const { extractTextFromPDF } = require('../lib/pdf-extractor');
 const { extractPdfsFromZip } = require('../lib/zip-extractor');
-const { appendRows } = require('../lib/sheets-client');
+
+const { fingerprint } = require('../lib/fingerprint');
 
 // Helper to parse multipart form data. Collects every uploaded file, so a request
 // can carry one PDF, several PDFs, or a zip of PDFs.
@@ -53,25 +54,17 @@ async function processResume(buffer) {
     .trim();
 }
 
+// Very long extractions are trimmed; real resumes are far shorter than this
+const MAX_RESUME_CHARS = 40000;
+
+// Extracts the text of every uploaded PDF (or PDFs inside a zip) and returns it.
+// Nothing is stored: the browser keeps the text for the rest of the screening.
 module.exports = async (req, res) => {
-  // CORS, method check and optional API key (see lib/http.js)
+  // CORS, method check and sign-in (see lib/http.js)
   if (!prepareRequest(req, res, 'POST')) return;
 
   try {
-    console.log('Parsing upload request...');
-    const { fields, files } = await parseMultipartForm(req);
-
-    // Validate inputs
-    const jd = fields.jd || fields.job_description;
-    const role = fields.role;
-
-    if (!jd) {
-      return res.status(400).json({ error: 'Job description (jd) is required' });
-    }
-
-    if (!role) {
-      return res.status(400).json({ error: 'Role is required' });
-    }
+    const { files } = await parseMultipartForm(req);
 
     if (files.length === 0 || files.every(f => f.buffer.length === 0)) {
       return res.status(400).json({ error: 'Resume PDF (or a .zip of PDFs) is required' });
@@ -91,59 +84,50 @@ module.exports = async (req, res) => {
       }
     }
 
-    console.log(`Processing ${pdfs.length} resume(s) for role: ${role}`);
+    console.log(`Extracting ${pdfs.length} resume(s)...`);
 
-    // Extract every PDF; one bad file doesn't stop the others
-    const uploadedAt = new Date().toISOString();
+    // One bad file doesn't stop the others. `id` identifies the resume by its content,
+    // so the browser can skip a resume it already has, whatever the file is called.
+    const seen = new Set();
     const report = [];
-    const rows = [];
     for (const pdf of pdfs) {
       if (pdf.error) {
         report.push({ filename: pdf.filename, status: 'failed', error: pdf.error });
         continue;
       }
       try {
-        const resume = await processResume(pdf.buffer);
-        report.push({ filename: pdf.filename, status: 'ok', resumeLength: resume.length });
-        // Columns A–D, blanks for E–M (filled by later steps), then N: filename
-        rows.push([jd, resume, uploadedAt, role, '', '', '', '', '', '', '', '', '', pdf.filename]);
+        const text = await processResume(pdf.buffer);
+        const id = fingerprint(text);
+        if (seen.has(id)) {
+          report.push({ filename: pdf.filename, status: 'duplicate', id, error: 'Same resume as another file in this upload' });
+          continue;
+        }
+        seen.add(id);
+        report.push({
+          filename: pdf.filename,
+          status: 'ok',
+          id,
+          resumeLength: text.length,
+          resume: text.slice(0, MAX_RESUME_CHARS)
+        });
       } catch (error) {
         console.error(`Failed to process ${pdf.filename}:`, error.message);
         report.push({ filename: pdf.filename, status: 'failed', error: error.message });
       }
     }
 
+    const ok = report.filter(r => r.status === 'ok').length;
+    const duplicates = report.filter(r => r.status === 'duplicate').length;
     const failed = report.filter(r => r.status === 'failed').length;
 
-    if (rows.length === 0) {
-      return res.status(400).json({
-        error: 'None of the uploaded resumes could be read',
-        files: report
-      });
+    if (ok === 0 && duplicates === 0) {
+      return res.status(400).json({ error: 'None of the uploaded resumes could be read', files: report });
     }
 
-    // All rows in one Sheets call
-    console.log(`Adding ${rows.length} resume(s) to Google Sheets...`);
-    await appendRows(role, rows);
-
-    const single = report.length === 1 ? report[0] : null;
-
-    // Return success
     return res.status(200).json({
       success: true,
-      message: failed === 0
-        ? `${rows.length} resume(s) uploaded successfully`
-        : `${rows.length} resume(s) uploaded, ${failed} failed`,
-      data: {
-        // filename / resumeLength kept for single-file callers
-        ...(single && { filename: single.filename, resumeLength: single.resumeLength }),
-        role,
-        uploaded: rows.length,
-        failed,
-        files: report,
-        uploadedAt,
-        jd_preview: jd.substring(0, 200) + '...'
-      }
+      message: [`${ok} resume(s) read`, duplicates && `${duplicates} duplicate(s)`, failed && `${failed} failed`].filter(Boolean).join(', '),
+      data: { uploaded: ok, duplicates, failed, files: report }
     });
 
   } catch (error) {

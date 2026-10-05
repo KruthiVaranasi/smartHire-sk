@@ -51,7 +51,7 @@
     <section class="panel" id="step-1" hidden>
       <div class="panel-head">
         <h1>Role &amp; resumes</h1>
-        <p>Describe the opening and add the resumes you received. You can upload in several rounds.</p>
+        <p>Describe the opening and add the resumes you received. Resumes are read in your browser session and never stored on the server.</p>
       </div>
       <div class="panel-body">
         <div class="grid-2">
@@ -59,7 +59,7 @@
             <div class="field">
               <label for="role">Role title</label>
               <input class="input" id="role" maxlength="90" placeholder="e.g. Senior Backend Engineer, Oct 2026" autocomplete="off">
-              <span class="help">Use a new title for each opening. It becomes a tab in your Google Sheet.</span>
+              <span class="help">Used to label your results and exports.</span>
             </div>
             <div class="field">
               <label for="jd">Job description</label>
@@ -82,9 +82,9 @@
         <div class="alert error" id="step1-error" role="alert" hidden></div>
       </div>
       <div class="panel-foot">
-        <span class="hint" id="upload-summary">No resumes uploaded yet.</span>
+        <span class="hint" id="upload-summary">No resumes added yet.</span>
         <div style="display:flex; gap:10px; flex-wrap:wrap">
-          <button class="btn btn-secondary" id="upload-btn" type="button" disabled>Upload resumes</button>
+          <button class="btn btn-secondary" id="upload-btn" type="button" hidden>Read resumes</button>
           <button class="btn btn-primary" id="to-step-2" type="button" disabled>Continue <span class="arrow" aria-hidden="true">→</span></button>
         </div>
       </div>
@@ -141,6 +141,18 @@
         </div>
         <div class="panel-body">
           <div class="summary" id="summary"></div>
+          <div class="export-bar">
+            <div>
+              <b>Keep these results</b>
+              <span>Nothing is stored on the server. Download a CSV, or save a copy to your Google Sheet.</span>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" id="download-csv" type="button">Download CSV</button>
+              <button class="btn btn-primary btn-sm" id="save-results" type="button" hidden>Save to Google Sheet</button>
+            </div>
+          </div>
+          <div class="alert info" id="save-notice" role="status" hidden></div>
+          <div class="alert error" id="save-error" role="alert" hidden></div>
           <div class="results-toolbar">
             <h2>Candidates</h2>
             <span class="meta">Click a candidate to see the reasoning</span>
@@ -148,7 +160,7 @@
           <ul class="candidates" id="candidates"></ul>
           <p class="human-note">
             <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5l5.5 2v4c0 3.2-2.3 5.9-5.5 7-3.2-1.1-5.5-3.8-5.5-7v-4l5.5-2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8l1.8 1.8L10.8 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Scores are a starting point for review. Every candidate stays in the list, and the full results are saved in your Google Sheet.
+            Scores are a starting point for review. Every candidate stays in the list; download or save the results before you leave.
           </p>
         </div>
         <div class="panel-foot">

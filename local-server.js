@@ -14,7 +14,8 @@ require('dotenv').config();
 // Import API handlers
 const uploadResume = require('./api/upload-resume');
 const generateQuestions = require('./api/generate-questions');
-const submitScreening = require('./api/submit-screening');
+const scoreResumes = require('./api/score-resumes');
+const saveResults = require('./api/save-results');
 const health = require('./api/health');
 const login = require('./api/login');
 
@@ -24,7 +25,8 @@ const PORT = 3000;
 const routes = {
   '/api/upload-resume': uploadResume,
   '/api/generate-questions': generateQuestions,
-  '/api/submit-screening': submitScreening,
+  '/api/score-resumes': scoreResumes,
+  '/api/save-results': saveResults,
   '/api/health': health,
   '/api/login': login
 };
@@ -135,7 +137,8 @@ server.listen(PORT, () => {
   console.log('\n📋 Available endpoints:');
   console.log('   - POST http://localhost:3000/api/upload-resume');
   console.log('   - POST http://localhost:3000/api/generate-questions');
-  console.log('   - POST http://localhost:3000/api/submit-screening');
+  console.log('   - POST http://localhost:3000/api/score-resumes');
+  console.log('   - POST http://localhost:3000/api/save-results');
   console.log('   - POST http://localhost:3000/api/login');
   console.log('   - GET  http://localhost:3000/api/health');
   console.log('\n💡 To test the API, run in another terminal:');
