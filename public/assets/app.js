@@ -9,7 +9,8 @@
   const SCORE_BATCH = 3;           // resumes per scoring request (finishes well inside 60s)
   const REQUEST_TIMEOUT_MS = 75000;
   const JSZIP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-  const STATE_KEY = 'smarthire.state';
+  // Versioned: a session saved by an older version of the app is ignored, not misread
+  const STATE_KEY = 'smarthire.state.v2';
   const TOKEN_KEY = 'smarthire.token';
 
   const $ = (id) => document.getElementById(id);
@@ -35,7 +36,19 @@
     saved: null         // { sheet_url, tab, email_sent } after "Save results"
   });
 
+  // Links from the landing page open /app?new to start a fresh screening; a plain
+  // refresh of /app keeps the current one
+  const startFresh = new URLSearchParams(location.search).has('new');
+  if (startFresh) {
+    store.remove(STATE_KEY);
+    history.replaceState(null, '', location.pathname);
+  }
+
   let state = Object.assign(freshState(), store.get(STATE_KEY) || {});
+
+  // Never open a step whose inputs are missing
+  if (!state.resumes.length) state.step = 1;
+  else if (state.step === 3 && !state.questions) state.step = 2;
   let token = store.get(TOKEN_KEY);
   let queue = [];       // files picked but not read yet: { id, file, name, size, status }
   let busy = false;
@@ -492,6 +505,8 @@
   const pendingResumes = () => { const byId = currentScores(); return state.resumes.filter(r => !byId[r.id]); };
 
   function renderStep3() {
+    // Without resumes there is nothing to score (and "all scored" would loop forever)
+    if (!state.resumes.length) { goTo(1); return; }
     if (!state.questions) { goTo(2); return; }
     const done = pendingResumes().length === 0 && state.resumes.length > 0;
     $('results-view').hidden = !done || screening;
@@ -508,6 +523,7 @@
 
   async function runScreening({ restart = false } = {}) {
     if (screening) return;
+    if (!state.resumes.length) { goTo(1); return; }
     if (!state.questions) { goTo(2); return; }
     screening = true;
     if (restart) { state.scores = { key: scoresKey(), byId: {} }; state.saved = null; save(); }
