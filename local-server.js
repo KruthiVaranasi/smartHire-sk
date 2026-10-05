@@ -1,10 +1,12 @@
 /**
  * Local Development Server
- * Runs API endpoints without Vercel CLI
+ * Runs the API endpoints and serves the web app in public/, like Vercel does
  */
 
 const http = require('http');
 const url = require('url');
+const fs = require('fs');
+const path = require('path');
 
 // Load environment variables
 require('dotenv').config();
@@ -14,6 +16,7 @@ const uploadResume = require('./api/upload-resume');
 const generateQuestions = require('./api/generate-questions');
 const submitScreening = require('./api/submit-screening');
 const health = require('./api/health');
+const login = require('./api/login');
 
 const PORT = 3000;
 
@@ -22,8 +25,37 @@ const routes = {
   '/api/upload-resume': uploadResume,
   '/api/generate-questions': generateQuestions,
   '/api/submit-screening': submitScreening,
-  '/api/health': health
+  '/api/health': health,
+  '/api/login': login
 };
+
+// Static files for the web app
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const CONTENT_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json'
+};
+
+// Serves /, /app (as app.html) and files under public/; false if nothing matched
+function serveStatic(pathname, res) {
+  let relative = decodeURIComponent(pathname);
+  if (relative.endsWith('/')) relative += 'index.html';
+  if (!path.extname(relative)) relative += '.html';
+
+  const file = path.normalize(path.join(PUBLIC_DIR, relative));
+  if (!file.startsWith(PUBLIC_DIR + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    return false;
+  }
+
+  res.setHeader('Content-Type', CONTENT_TYPES[path.extname(file)] || 'application/octet-stream');
+  fs.createReadStream(file).pipe(res);
+  return true;
+}
 
 // Add Express-like methods to response object
 function addExpressMethods(res) {
@@ -55,6 +87,7 @@ const server = http.createServer(async (req, res) => {
   const handler = routes[pathname];
 
   if (!handler) {
+    if (req.method === 'GET' && !pathname.startsWith('/api/') && serveStatic(pathname, res)) return;
     res.status(404).json({ error: 'Not found' });
     return;
   }
@@ -98,10 +131,12 @@ server.listen(PORT, () => {
   console.log('🚀 Local Development Server Started');
   console.log('='.repeat(70));
   console.log(`\n✅ Server running at: http://localhost:${PORT}`);
+  console.log(`   Web app:   http://localhost:${PORT}/  (workspace: http://localhost:${PORT}/app)`);
   console.log('\n📋 Available endpoints:');
   console.log('   - POST http://localhost:3000/api/upload-resume');
   console.log('   - POST http://localhost:3000/api/generate-questions');
   console.log('   - POST http://localhost:3000/api/submit-screening');
+  console.log('   - POST http://localhost:3000/api/login');
   console.log('   - GET  http://localhost:3000/api/health');
   console.log('\n💡 To test the API, run in another terminal:');
   console.log('   npm test');

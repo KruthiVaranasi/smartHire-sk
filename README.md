@@ -18,6 +18,15 @@ AI-powered resume screening system converted from n8n workflow using **Google Ge
 - **Gmail API** - Email notifications
 - **pdf-parse** - PDF text extraction
 
+## 🖥️ Web app
+
+The repo includes a web front end in `public/`, deployed together with the API:
+
+- `/`: landing page (the problem, the approach, how it works)
+- `/app`: the workspace. Add a role and job description, upload PDFs or a zip (unzipped in the browser, so size isn't limited by Vercel's 4.5 MB request cap), answer the AI's questions, and review the ranked shortlist with the reasoning for each candidate
+
+Set `APP_PASSWORD` to require a shared team password for the workspace and the API. Locally, `npm run dev` serves the whole app at http://localhost:3000.
+
 ## 🛠️ Setup
 
 ### 1. Clone & Install
@@ -44,7 +53,8 @@ Required variables:
 
 Optional security variables (see [Security](#-security)):
 - `ALLOWED_ORIGINS`: comma-separated origins allowed to call the API from a browser, e.g. `https://your-app.lovable.app`. Unset means any origin.
-- `API_KEY`: when set, every request except `/api/health` must send it in the `x-api-key` header.
+- `APP_PASSWORD`: shared password for the web app. When set, every API request except `/api/health` and `/api/login` needs a session from `POST /api/login` (sent as `Authorization: Bearer <token>`). Sessions last 12 hours; changing the password signs everyone out.
+- `API_KEY`: when set, server-to-server callers can send it in the `x-api-key` header instead.
 
 ### 3. Deploy to Vercel
 

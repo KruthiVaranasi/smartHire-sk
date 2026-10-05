@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workspace — SmartHire</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="app-body">
+
+<header class="site-header app-header scrolled">
+  <div class="container">
+    <a class="brand" href="/"><img src="/assets/logo.svg" alt="">SmartHire</a>
+    <div class="right">
+      <span class="role-pill" id="role-pill" title="Current role">Role <b id="role-pill-name"></b></span>
+      <button class="btn btn-ghost btn-sm" id="new-screening" type="button" hidden>New screening</button>
+      <button class="btn btn-ghost btn-sm" id="sign-out" type="button" hidden>Sign out</button>
+    </div>
+  </div>
+</header>
+
+<!-- Sign-in gate (only when the server requires a password) -->
+<section class="gate" id="gate" hidden>
+  <form class="gate-card" id="gate-form">
+    <h1>Welcome back</h1>
+    <p>Enter the team password to open the SmartHire workspace.</p>
+    <div class="field">
+      <label for="password">Password</label>
+      <input class="input" id="password" type="password" autocomplete="current-password" required>
+    </div>
+    <div class="alert error" id="gate-error" role="alert" hidden></div>
+    <button class="btn btn-primary btn-lg" type="submit" id="gate-submit">Sign in</button>
+  </form>
+</section>
+
+<main class="app-main" id="workspace" hidden>
+  <div class="container">
+
+    <ol class="stepper" aria-label="Progress">
+      <li data-step="1"><span class="dot">1</span><span class="label"><b>Role &amp; resumes</b><span>Upload PDFs or a zip</span></span></li>
+      <li data-step="2"><span class="dot">2</span><span class="label"><b>Clarify the role</b><span>Answer AI questions</span></span></li>
+      <li data-step="3"><span class="dot">3</span><span class="label"><b>Ranked shortlist</b><span>Review results</span></span></li>
+    </ol>
+
+    <!-- Step 1: role and resumes -->
+    <section class="panel" id="step-1" hidden>
+      <div class="panel-head">
+        <h1>Role &amp; resumes</h1>
+        <p>Describe the opening and add the resumes you received. You can upload in several rounds.</p>
+      </div>
+      <div class="panel-body">
+        <div class="grid-2">
+          <div>
+            <div class="field">
+              <label for="role">Role title</label>
+              <input class="input" id="role" maxlength="90" placeholder="e.g. Senior Backend Engineer, Oct 2026" autocomplete="off">
+              <span class="help">Use a new title for each opening. It becomes a tab in your Google Sheet.</span>
+            </div>
+            <div class="field">
+              <label for="jd">Job description</label>
+              <textarea class="textarea" id="jd" rows="12" placeholder="Paste the full job description here…"></textarea>
+            </div>
+          </div>
+          <div>
+            <div class="field">
+              <span class="label">Resumes</span>
+              <label class="dropzone" id="dropzone" for="file-input">
+                <svg viewBox="0 0 34 34" fill="none" aria-hidden="true"><path d="M17 22V8M11 13.5L17 7.5l6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 21v3.5A3.5 3.5 0 009.5 28h15a3.5 3.5 0 003.5-3.5V21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                <b>Drop PDFs or a .zip here</b>
+                <span>or click to browse · text-based PDFs, up to 100 per zip</span>
+              </label>
+              <input id="file-input" type="file" accept=".pdf,.zip,application/pdf,application/zip" multiple hidden>
+            </div>
+            <ul class="file-list" id="file-list" aria-live="polite"></ul>
+          </div>
+        </div>
+        <div class="alert error" id="step1-error" role="alert" hidden></div>
+      </div>
+      <div class="panel-foot">
+        <span class="hint" id="upload-summary">No resumes uploaded yet.</span>
+        <div style="display:flex; gap:10px; flex-wrap:wrap">
+          <button class="btn btn-secondary" id="upload-btn" type="button" disabled>Upload resumes</button>
+          <button class="btn btn-primary" id="to-step-2" type="button" disabled>Continue <span class="arrow" aria-hidden="true">→</span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2: clarifying questions -->
+    <section class="panel" id="step-2" hidden>
+      <div class="panel-head">
+        <h1>Clarify the role</h1>
+        <p>These questions were written for this job description. Your answers become the scoring criteria, and they override the JD where the two disagree.</p>
+      </div>
+      <div class="panel-body">
+        <div id="questions-loading" hidden>
+          <div class="loading-line"><span class="spinner"></span>Reading the job description and writing questions…</div>
+          <div class="questions">
+            <div class="skeleton q"></div><div class="skeleton q"></div><div class="skeleton q"></div>
+          </div>
+        </div>
+        <div class="questions" id="questions"></div>
+        <div class="alert error" id="step2-error" role="alert" hidden></div>
+      </div>
+      <div class="panel-foot">
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+          <button class="btn btn-ghost" id="back-to-1" type="button">← Back</button>
+          <span class="hint" id="answer-count"></span>
+        </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap">
+          <button class="btn btn-secondary" id="regenerate" type="button" hidden>New questions</button>
+          <button class="btn btn-primary" id="start-screening" type="button" disabled>Screen candidates <span class="arrow" aria-hidden="true">→</span></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 3: screening and results -->
+    <section class="panel" id="step-3" hidden>
+      <div class="panel-body" id="progress-view" hidden>
+        <div class="progress-wrap" aria-live="polite">
+          <h2>Screening candidates</h2>
+          <p>Each resume is read against the job description and your answers.</p>
+          <div class="progress indeterminate" id="progress"><span id="progress-bar"></span></div>
+          <div class="progress-count" id="progress-count">Starting…</div>
+        </div>
+        <div class="alert error" id="step3-error" role="alert" hidden></div>
+        <div style="display:flex; justify-content:center; gap:10px; margin-top:18px">
+          <button class="btn btn-secondary" id="progress-back" type="button" hidden>← Back to answers</button>
+          <button class="btn btn-primary" id="retry-screening" type="button" hidden>Retry</button>
+        </div>
+      </div>
+
+      <div id="results-view" hidden>
+        <div class="panel-head">
+          <h1>Ranked shortlist</h1>
+          <p id="results-intro"></p>
+        </div>
+        <div class="panel-body">
+          <div class="summary" id="summary"></div>
+          <div class="results-toolbar">
+            <h2>Candidates</h2>
+            <span class="meta">Click a candidate to see the reasoning</span>
+          </div>
+          <ul class="candidates" id="candidates"></ul>
+          <p class="human-note">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5l5.5 2v4c0 3.2-2.3 5.9-5.5 7-3.2-1.1-5.5-3.8-5.5-7v-4l5.5-2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8l1.8 1.8L10.8 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Scores are a starting point for review. Every candidate stays in the list, and the full results are saved in your Google Sheet.
+          </p>
+        </div>
+        <div class="panel-foot">
+          <button class="btn btn-ghost" id="edit-answers" type="button">← Edit answers</button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap">
+            <button class="btn btn-secondary" id="rerun" type="button">Re-run screening</button>
+            <button class="btn btn-primary" id="new-screening-2" type="button">New screening</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

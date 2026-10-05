@@ -28,6 +28,16 @@ async function mapWithLimit(items, limit, deadline, fn) {
 
 const MAX_ANSWERS = 10;
 
+// strengths / gaps are stored in the sheet as JSON strings
+function parseList(value) {
+  try {
+    const list = JSON.parse(value || '[]');
+    return Array.isArray(list) ? list.map(String) : [];
+  } catch (error) {
+    return value ? [String(value)] : [];
+  }
+}
+
 // Older frontends send exactly four fields, answer1..answer4, for the original fixed
 // questions. Turn them into the { question, answer } list used now.
 const LEGACY_QUESTIONS = [
@@ -164,6 +174,9 @@ module.exports = async (req, res) => {
         filename: row.filename,
         candidate_name: row.candidate_name,
         score: Number(row.score) || 0,
+        strengths: row.strengths,
+        gaps: row.gaps,
+        justification: row.justification,
         recommendation: row.recommendation,
         interview_priority: row.interview_priority
       });
@@ -234,7 +247,21 @@ module.exports = async (req, res) => {
           filename: r.filename || '',
           score: r.score,
           recommendation: r.recommendation
-        }))
+        })),
+        // Every ranked candidate with the reasoning behind the score, once the run is done
+        ...(remaining === 0 && {
+          candidates: results.map(r => ({
+            rank: r.rank,
+            candidate_name: r.candidate_name || '',
+            filename: r.filename || '',
+            score: r.score,
+            recommendation: r.recommendation,
+            interview_priority: r.interview_priority || '',
+            strengths: parseList(r.strengths),
+            gaps: parseList(r.gaps),
+            justification: r.justification || ''
+          }))
+        })
       }
     });
 

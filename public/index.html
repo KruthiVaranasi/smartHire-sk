@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmartHire — Resume screening that shows its reasoning</title>
+  <meta name="description" content="SmartHire asks HR what the job description leaves out, then scores every resume against those answers and shows the reasons behind each score. People make the final call.">
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+
+<header class="site-header" id="top">
+  <div class="container">
+    <a class="brand" href="/"><img src="/assets/logo.svg" alt="">SmartHire</a>
+    <nav class="nav" aria-label="Main">
+      <a href="#problem">The problem</a>
+      <a href="#approach">Our approach</a>
+      <a href="#how">How it works</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="/app">Open workspace</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div>
+        <span class="eyebrow">AI resume screening</span>
+        <h1>Screen resumes the way your <em>hiring manager</em> would.</h1>
+        <p class="lede">
+          SmartHire asks HR the questions your job description leaves unanswered, then reads every
+          resume against those answers. Each candidate comes back with a score and the reasons
+          behind it, so qualified people aren't lost to a keyword filter.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="/app">Start screening <span class="arrow" aria-hidden="true">→</span></a>
+          <a class="btn btn-secondary btn-lg" href="#how">See how it works</a>
+        </div>
+        <p class="hero-note">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5l5.5 2v4c0 3.2-2.3 5.9-5.5 7-3.2-1.1-5.5-3.8-5.5-7v-4l5.5-2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.5 8l1.8 1.8L10.8 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          SmartHire ranks candidates. People make the decision.
+        </p>
+      </div>
+
+      <div class="preview" aria-label="Example of SmartHire results">
+        <div class="preview-bar">
+          <div>
+            <div class="preview-title">Senior Backend Engineer</div>
+            <div class="preview-sub">24 resumes screened · 5 HR answers applied</div>
+          </div>
+          <span class="preview-tag">Example output</span>
+        </div>
+        <ul class="preview-list">
+          <li class="preview-row open">
+            <span class="preview-rank">1</span>
+            <div>
+              <div class="preview-name">Candidate A</div>
+              <div class="preview-meta">resume_a.pdf</div>
+            </div>
+            <div class="preview-score"><span class="badge strong-yes">Strong Yes</span><b>91</b></div>
+            <div class="preview-why">
+              <div class="why-label">Why this score</div>
+              <ul>
+                <li><span class="sign plus">+</span>Seven years building Node.js services at 2M requests/day</li>
+                <li><span class="sign plus">+</span>Led a payments migration, matching HR's 90-day goal</li>
+                <li><span class="sign minus">−</span>No Kubernetes, which HR marked as learnable on the job</li>
+              </ul>
+            </div>
+          </li>
+          <li class="preview-row">
+            <span class="preview-rank">2</span>
+            <div>
+              <div class="preview-name">Candidate B</div>
+              <div class="preview-meta">Career changer · bootcamp + 3 yrs</div>
+            </div>
+            <div class="preview-score"><span class="badge yes">Yes</span><b>78</b></div>
+          </li>
+          <li class="preview-row">
+            <span class="preview-rank">3</span>
+            <div>
+              <div class="preview-name">Candidate C</div>
+              <div class="preview-meta">resume_c.pdf</div>
+            </div>
+            <div class="preview-score"><span class="badge maybe">Maybe</span><b>62</b></div>
+          </li>
+        </ul>
+        <div class="preview-foot">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.3" stroke="currentColor" stroke-width="1.4"/><path d="M8 7.2v3.6M8 5v.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          Candidate B lists no "Senior" title, but is scored on the experience in the resume.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Problem -->
+  <section class="section alt" id="problem">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">The problem</span>
+        <h2>Automated screening is losing the people companies want to hire.</h2>
+        <p>Most screening software matches resumes against fixed criteria. The research shows what that costs employers, and why candidates have stopped trusting it.</p>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-number">88<span class="unit">%</span></div>
+          <p class="stat-text">of employers agree that qualified, high-skill candidates are screened out because they don't match the exact criteria in the job description.</p>
+          <p class="stat-source"><a href="#source-1">Harvard Business School &amp; Accenture, 2021</a></p>
+        </div>
+        <div class="stat">
+          <div class="stat-number">27<span class="unit">M+</span></div>
+          <p class="stat-text">"hidden workers" in the US alone: people who want to work and have, or could build, the skills employers ask for.</p>
+          <p class="stat-source"><a href="#source-1">Harvard Business School &amp; Accenture, 2021</a></p>
+        </div>
+        <div class="stat">
+          <div class="stat-number">26<span class="unit">%</span></div>
+          <p class="stat-text">of job applicants trust AI to evaluate them fairly, in a survey of 2,918 candidates.</p>
+          <p class="stat-source"><a href="#source-2">Gartner, 2025</a></p>
+        </div>
+        <div class="stat">
+          <div class="stat-number">38<span class="unit">%</span></div>
+          <p class="stat-text">of applicants want assurance that a human reviewed the AI's evaluation before a decision was made.</p>
+          <p class="stat-source"><a href="#source-2">Gartner, 2025</a></p>
+        </div>
+      </div>
+
+      <div class="takeaway">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <p><strong>The failure isn't AI itself, it's rigid criteria applied without context.</strong> A job description can't say which requirements truly matter, which can be learned, or what the team actually needs. SmartHire asks HR exactly that before a single resume is scored.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Approach -->
+  <section class="section" id="approach">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Our approach</span>
+        <h2>From keyword gates to criteria HR actually defines.</h2>
+        <p>The same resumes, judged two different ways.</p>
+      </div>
+
+      <table class="compare">
+        <thead>
+          <tr>
+            <th scope="col"><span class="sr-only">Aspect</span></th>
+            <th scope="col">Keyword filtering</th>
+            <th scope="col" class="ours">SmartHire</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">Where the criteria come from</th>
+            <td><span class="x">✕</span>The job description, taken literally</td>
+            <td class="ours"><span class="check">✓</span>The job description plus HR's answers to 3–8 questions written for that specific role</td>
+          </tr>
+          <tr>
+            <th scope="row">How resumes are read</th>
+            <td><span class="x">✕</span>Exact titles and keywords must appear</td>
+            <td class="ours"><span class="check">✓</span>Experience is read for meaning, so equivalent skills and unconventional paths count</td>
+          </tr>
+          <tr>
+            <th scope="row">What HR gets back</th>
+            <td><span class="x">✕</span>Pass or reject, with no explanation</td>
+            <td class="ours"><span class="check">✓</span>A score, strengths with evidence, gaps, and a written justification for every candidate</td>
+          </tr>
+          <tr>
+            <th scope="row">Must-haves vs. nice-to-haves</th>
+            <td><span class="x">✕</span>Every listed requirement weighs the same</td>
+            <td class="ours"><span class="check">✓</span>HR's answers decide what is a deal-breaker and what can be learned on the job</td>
+          </tr>
+          <tr>
+            <th scope="row">Gaming the system</th>
+            <td><span class="x">✕</span>Keyword stuffing raises the match rate</td>
+            <td class="ours"><span class="check">✓</span>Instructions hidden in a resume are ignored and flagged as a concern</td>
+          </tr>
+          <tr>
+            <th scope="row">Who decides</th>
+            <td><span class="x">✕</span>The filter rejects before anyone looks</td>
+            <td class="ours"><span class="check">✓</span>Every resume is ranked and kept; HR decides who moves forward</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section alt" id="how">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">How it works</span>
+        <h2>Three steps, about as long as a coffee break.</h2>
+      </div>
+
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <h3>Add the role and resumes</h3>
+          <p>Paste the job description and drop in resumes as PDFs or a single zip file.</p>
+          <p class="detail">Text is extracted from each PDF. Files that can't be read are flagged, not silently dropped.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <h3>Answer what the JD leaves out</h3>
+          <p>SmartHire writes 3–8 questions for this specific role: true must-haves, first-90-day goals, team setup, deal-breakers.</p>
+          <p class="detail">A clear JD gets fewer questions; a vague or senior one gets more.</p>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <h3>Review a ranked shortlist</h3>
+          <p>Every resume is scored against the JD and your answers, with the reasoning attached.</p>
+          <p class="detail">Results are saved to your Google Sheet, and HR can get an email summary.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Output -->
+  <section class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">For every candidate</span>
+        <h2>A recommendation you can explain.</h2>
+        <p>Nothing is a black box. Every part of the evaluation is written out, saved, and open to review.</p>
+      </div>
+
+      <div class="features">
+        <div class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 18 18" fill="none"><path d="M2.5 14.5l4-5 3 3 6-8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3>Score out of 100</h3>
+          <p>Weighted across technical skills, experience, fit with HR's context, and overall potential.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 18 18" fill="none"><path d="M9 3.5v11M3.5 9h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <h3>Strengths with evidence</h3>
+          <p>Each strength points to something specific in the resume, not a generic label.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 18 18" fill="none"><path d="M3.5 9h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <h3>Gaps and concerns</h3>
+          <p>What's missing or unclear, so interviews can probe the right things.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 18 18" fill="none"><path d="M4 4.5h10M4 9h10M4 13.5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <h3>Written justification</h3>
+          <p>A short paragraph explaining how the score was reached against your criteria.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6"/><path d="M6.8 9.1l1.5 1.5 3-3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3>Recommendation</h3>
+          <p>Strong Yes, Yes, Maybe or No, plus an interview priority to plan your week.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon"><svg viewBox="0 0 18 18" fill="none"><rect x="3" y="3" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M3 7.5h12M7.5 7.5V15" stroke="currentColor" stroke-width="1.6"/></svg></div>
+          <h3>Saved to Google Sheets</h3>
+          <p>Every result, HR answer and question is kept in your own sheet, ready to audit or share.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-band">
+    <div class="container">
+      <div class="cta-card">
+        <div>
+          <h2>Find the candidates your filters would have missed.</h2>
+          <p>Upload your resumes and get a ranked, explained shortlist in minutes.</p>
+        </div>
+        <a class="btn btn-lg" href="/app">Open workspace <span class="arrow" aria-hidden="true">→</span></a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <div>
+      <a class="brand" href="#top"><img src="/assets/logo.svg" alt="">SmartHire</a>
+      <p style="margin-top:12px">Resume screening that shows its reasoning.</p>
+    </div>
+    <div class="footer-sources">
+      <h4>Sources</h4>
+      <ol>
+        <li id="source-1">Fuller, J. B., Raman, M., et al. <a href="https://www.hbs.edu/ris/Publication%20Files/hiddenworkers09032021_Fuller_white_paper_33a2047f-41dd-47b1-9a8d-bd08cf3bfa94.pdf" target="_blank" rel="noopener"><em>Hidden Workers: Untapped Talent</em></a>. Harvard Business School Project on Managing the Future of Work and Accenture, September 2021.</li>
+        <li id="source-2">Gartner. <a href="https://prwire.com.au/pr/123287/gartner-survey-shows-only-26-of-job-applicants-trust-ai-will-fairly-evaluate-them" target="_blank" rel="noopener">"Gartner Survey Shows Only 26% of Job Applicants Trust AI Will Fairly Evaluate Them"</a>. Survey of 2,918 job candidates, Q1 2025.</li>
+      </ol>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Hairline under the header once the page scrolls
+  const header = document.querySelector('.site-header');
+  const onScroll = () => header.classList.toggle('scrolled', window.scrollY > 8);
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+</script>
+</body>
+</html>
